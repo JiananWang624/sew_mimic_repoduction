@@ -53,8 +53,8 @@ def make_synthetic_trajectory(
     hand_orientations = np.empty((frame_count, 3, 3))
 
     for frame, q_reference in enumerate(reference_q):
-        upper_direction = robot.R_0_i(q_reference, 3) @ robot.axes[2]
-        lower_direction = robot.R_0_i(q_reference, 5) @ robot.axes[4]
+        upper_direction = robot.R_0_i(q_reference, 3) @ robot.arm_proxy_axis(3)
+        lower_direction = robot.R_0_i(q_reference, 5) @ robot.arm_proxy_axis(5)
         elbows[frame] = shoulders[frame] + upper_direction
         wrists[frame] = elbows[frame] + lower_direction
         hand_orientations[frame] = robot.aligned_ee_rotation(q_reference)

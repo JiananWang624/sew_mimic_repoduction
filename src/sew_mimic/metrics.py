@@ -45,8 +45,8 @@ def compute_retarget_diagnostics(
 ) -> RetargetDiagnostics:
     """Measure the three Algorithm 1 alignment residuals and joint validity."""
     configuration = np.asarray(q, dtype=float)
-    robot_upper_arm = robot.R_0_i(configuration, 3) @ robot.axes[2]
-    robot_lower_arm = robot.R_0_i(configuration, 5) @ robot.axes[4]
+    robot_upper_arm = robot.R_0_i(configuration, 3) @ robot.arm_proxy_axis(3)
+    robot_lower_arm = robot.R_0_i(configuration, 5) @ robot.arm_proxy_axis(5)
     hand = np.asarray(hand_orientation, dtype=float)
     limits = robot.joint_limits
     limit_valid = bool(

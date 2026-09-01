@@ -46,12 +46,17 @@ def test_align_axis_random_targets_are_aligned_to_machine_precision(axis_index: 
         lower, upper = robot.joint_limits[second_q_index]
         margin = 0.05 * (upper - lower)
         desired[second_q_index] = RNG.uniform(lower + margin, upper - margin)
-        target = robot.R_0_i(desired, axis_index) @ robot.axes[axis_index - 1]
+        axis_to_align = (
+            robot.arm_proxy_axis(axis_index)
+            if axis_index in (3, 5)
+            else robot.axes[axis_index - 1]
+        )
+        target = robot.R_0_i(desired, axis_index) @ axis_to_align
 
         solution = align_axis(axis_index, q0, target, robot)
         result = q0.copy()
         result[[first_q_index, second_q_index]] = solution
-        aligned_axis = robot.R_0_i(result, axis_index) @ robot.axes[axis_index - 1]
+        aligned_axis = robot.R_0_i(result, axis_index) @ axis_to_align
 
         assert np.linalg.norm(aligned_axis - target) < 2e-12
 
@@ -101,14 +106,50 @@ def test_align_axis_raises_when_all_solutions_violate_limits(
         align_axis(3, q0, [1.0, 0.0, 0.0], robot)
 
 
-def test_gen3_alignment_makes_tool_x_parallel_to_joint_7() -> None:
+def test_lower_align_uses_signed_proxy_but_native_predecessor_axes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    robot = gen3_kinematics()
+    q0 = np.zeros(7)
+    captured: tuple[np.ndarray, ...] | None = None
+
+    def capture_sp2(*args: np.ndarray) -> np.ndarray:
+        nonlocal captured
+        captured = tuple(np.asarray(argument).copy() for argument in args)
+        return np.zeros((1, 2))
+
+    monkeypatch.setattr(retarget_module, "sp2", capture_sp2)
+    align_axis(5, q0, robot.arm_proxy_axis(5), robot)
+
+    assert captured is not None
+    rotation_0_to_3 = robot.R_0_i(q0, 3)
+    expected_proxy_in_3 = (
+        rotation_0_to_3.T
+        @ robot.R_0_i(q0, 5)
+        @ robot.arm_proxy_axis(5)
+    )
+    expected_h4_in_3 = (
+        rotation_0_to_3.T @ robot.R_0_i(q0, 4) @ robot.axes[3]
+    )
+    np.testing.assert_allclose(captured[1], expected_proxy_in_3, atol=0.0)
+    np.testing.assert_allclose(captured[2], -robot.axes[2], atol=0.0)
+    np.testing.assert_allclose(captured[3], expected_h4_in_3, atol=0.0)
+
+
+def test_gen3_alignment_makes_tool_x_follow_physical_mount_direction() -> None:
     robot = gen3_kinematics()
 
     aligned_tool_x_in_7 = (
-        robot.ee_rotation_in_7 @ robot.ee_alignment @ np.array([1.0, 0.0, 0.0])
+        robot.ee_rotation_in_7
+        @ robot.R_robot_align
+        @ np.array([1.0, 0.0, 0.0])
     )
 
-    np.testing.assert_allclose(aligned_tool_x_in_7, robot.axes[6], atol=2e-16)
+    mount_direction_in_7 = robot.ee_position_in_7 / np.linalg.norm(
+        robot.ee_position_in_7
+    )
+    np.testing.assert_allclose(aligned_tool_x_in_7, mount_direction_in_7, atol=2e-16)
+    np.testing.assert_allclose(mount_direction_in_7, -robot.axes[6], atol=0.0)
 
 
 def test_align_wrist_matches_desired_hand_rotation_to_machine_precision() -> None:
@@ -165,8 +206,8 @@ def test_sew_mimic_matches_all_three_orientations_to_machine_precision() -> None
             robot.joint_limits[[1, 3, 5], 1] - 0.01,
         )
 
-        upper_arm = robot.R_0_i(desired, 3) @ robot.axes[2]
-        lower_arm = robot.R_0_i(desired, 5) @ robot.axes[4]
+        upper_arm = robot.R_0_i(desired, 3) @ robot.arm_proxy_axis(3)
+        lower_arm = robot.R_0_i(desired, 5) @ robot.arm_proxy_axis(5)
         shoulder = RNG.normal(size=3)
         elbow = shoulder + 0.31 * upper_arm
         wrist = elbow + 0.27 * lower_arm
@@ -177,10 +218,14 @@ def test_sew_mimic_matches_all_three_orientations_to_machine_precision() -> None
 
         np.testing.assert_array_equal(q0, q0_before)
         np.testing.assert_allclose(
-            robot.R_0_i(result, 3) @ robot.axes[2], upper_arm, atol=2e-12
+            robot.R_0_i(result, 3) @ robot.arm_proxy_axis(3),
+            upper_arm,
+            atol=2e-12,
         )
         np.testing.assert_allclose(
-            robot.R_0_i(result, 5) @ robot.axes[4], lower_arm, atol=2e-12
+            robot.R_0_i(result, 5) @ robot.arm_proxy_axis(5),
+            lower_arm,
+            atol=2e-12,
         )
         assert _rotation_angle(robot.aligned_ee_rotation(result).T @ H) < 2e-12
         assert diagnostics["joint_limit_valid"] is True

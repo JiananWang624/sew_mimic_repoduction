@@ -18,6 +18,11 @@ GEN3_SCENE_PATH = PROJECT_ROOT / "assets" / "kinova_gen3" / "scene.xml"
 Matrix = NDArray[np.float64]
 Vector = NDArray[np.float64]
 
+# Menagerie's native h3/h5 axes oppose the corresponding joint-anchor chain;
+# the sign choice is validated statistically over the Gen3 joint limits.
+UPPER_ARM_PROXY_SIGN = -1.0
+LOWER_ARM_PROXY_SIGN = -1.0
+
 
 def load_mujoco_model(xml_path: str | Path) -> mujoco.MjModel:
     """Load an MJCF model from disk."""
@@ -150,12 +155,23 @@ class Gen3Kinematics:
         self.ee_position_in_7 = np.asarray(model.site_pos[pinch_site_id], dtype=float).copy()
         self.ee_rotation_in_7 = _quat_to_matrix(model.site_quat[pinch_site_id])
 
-        # The paper's R_align makes the tool +X pointing direction parallel
-        # to h7. Menagerie's pinch_site uses a different axis convention, so
-        # derive the smallest fixed convention rotation instead of guessing
-        # an axis permutation.
-        pointing_axis_in_tool = self.ee_rotation_in_7.T @ self.axes[-1]
-        self.ee_alignment = _align_x_axis_with(pointing_axis_in_tool)
+        # The physical tool points from joint 7 toward pinch_site. Menagerie's
+        # offset is anti-parallel to native +h7, so encode that convention in
+        # R_robot_align without changing the native joint rotation axis.
+        mount_offset_norm = float(np.linalg.norm(self.ee_position_in_7))
+        if mount_offset_norm <= 1e-12:
+            raise ValueError("pinch_site offset must define a tool pointing direction")
+        pointing_axis_in_7 = self.ee_position_in_7 / mount_offset_norm
+        pointing_axis_in_tool = self.ee_rotation_in_7.T @ pointing_axis_in_7
+        self.R_robot_align = _align_x_axis_with(pointing_axis_in_tool)
+
+    def arm_proxy_axis(self, joint_number: int) -> Vector:
+        """Return the Gen3 limb-pointing proxy without changing native axes."""
+        if joint_number == 3:
+            return UPPER_ARM_PROXY_SIGN * self.axes[2]
+        if joint_number == 5:
+            return LOWER_ARM_PROXY_SIGN * self.axes[4]
+        raise ValueError("arm proxy is defined only for joint 3 or joint 5")
 
     @staticmethod
     def _name(model: mujoco.MjModel, object_type: mujoco.mjtObj, object_id: int) -> str:
@@ -224,7 +240,7 @@ class Gen3Kinematics:
 
     def aligned_ee_rotation(self, q: ArrayLike) -> Matrix:
         """Return the paper-convention end-effector orientation ``T(q)``."""
-        return self.ee_rotation(q) @ self.ee_alignment
+        return self.ee_rotation(q) @ self.R_robot_align
 
 
 @lru_cache(maxsize=1)

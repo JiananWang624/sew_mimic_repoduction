@@ -86,15 +86,22 @@ def align_axis(i: int, q0: ArrayLike, v: ArrayLike, robot: Gen3Kinematics) -> Ve
     rotation_0_to_frame = robot.R_0_i(configuration, frame_index)
     target_in_frame = rotation_0_to_frame.T @ target
 
-    # Algorithm 2, line 2: express h_i in the current (i-2) frame.
-    axis_i_in_frame = (
+    # Algorithm 2, line 2: express the axis to align in frame (i-2). For the
+    # Gen3 upper/lower limbs this is a signed pointing proxy; axes[] remains
+    # the native kinematic rotation-axis convention. Wrist i=7 stays native.
+    axis_to_align_local = (
+        robot.arm_proxy_axis(joint_index)
+        if joint_index in (3, 5)
+        else robot.axes[joint_index - 1]
+    )
+    axis_to_align_in_frame = (
         rotation_0_to_frame.T
         @ robot.R_0_i(configuration, joint_index)
-        @ robot.axes[joint_index - 1]
+        @ axis_to_align_local
     )
 
-    # Algorithm 2, line 3: express h_(i-1) in the current (i-2) frame.
-    axis_i_minus_1_in_frame = (
+    # Algorithm 2, line 3: predecessor axes are always native rotation axes.
+    predecessor_axis_in_frame = (
         rotation_0_to_frame.T
         @ robot.R_0_i(configuration, joint_index - 1)
         @ robot.axes[joint_index - 2]
@@ -103,9 +110,9 @@ def align_axis(i: int, q0: ArrayLike, v: ArrayLike, robot: Gen3Kinematics) -> Ve
     # Algorithm 2, lines 4-5: solve the two-axis alignment with SP2.
     angle_deltas = sp2(
         target_in_frame,
-        axis_i_in_frame,
+        axis_to_align_in_frame,
         -robot.axes[joint_index - 3],
-        axis_i_minus_1_in_frame,
+        predecessor_axis_in_frame,
     )
     current_pair = configuration[[first_q_index, second_q_index]]
     candidates = current_pair + angle_deltas
@@ -148,7 +155,7 @@ def align_wrist(
     # Algorithm 3, line 2: desired orientation of the seventh joint frame.
     desired_rotation_0_to_7 = (
         hand_orientation
-        @ robot.ee_alignment.T
+        @ robot.R_robot_align.T
         @ rotation_local_7_to_tool.T
     )
 

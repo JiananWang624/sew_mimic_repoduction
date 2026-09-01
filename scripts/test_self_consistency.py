@@ -77,8 +77,8 @@ def run_self_consistency(samples: int, seed: int) -> int:
         q_target = _random_configuration(robot, rng)
         q0 = _random_configuration(robot, rng)
 
-        upper_direction = robot.R_0_i(q_target, 3) @ robot.axes[2]
-        lower_direction = robot.R_0_i(q_target, 5) @ robot.axes[4]
+        upper_direction = robot.R_0_i(q_target, 3) @ robot.arm_proxy_axis(3)
+        lower_direction = robot.R_0_i(q_target, 5) @ robot.arm_proxy_axis(5)
         hand_orientation = robot.aligned_ee_rotation(q_target)
 
         shoulder = np.zeros(3)
@@ -98,8 +98,8 @@ def run_self_consistency(samples: int, seed: int) -> int:
             errors[sample_index] = np.nan
             continue
 
-        result_upper = robot.R_0_i(q_result, 3) @ robot.axes[2]
-        result_lower = robot.R_0_i(q_result, 5) @ robot.axes[4]
+        result_upper = robot.R_0_i(q_result, 3) @ robot.arm_proxy_axis(3)
+        result_lower = robot.R_0_i(q_result, 5) @ robot.arm_proxy_axis(5)
         result_hand = robot.aligned_ee_rotation(q_result)
         errors[sample_index] = [
             _vector_error_deg(result_upper, upper_direction),

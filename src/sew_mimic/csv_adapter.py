@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 from numpy.typing import ArrayLike, NDArray
 
-from .human_input import transform_human_to_robot_body_frame, wrist_euler_to_rotation
+from .human_input import wrist_euler_to_rotation
 
 
 Vector = NDArray[np.float64]
@@ -29,11 +29,17 @@ POSITION_COLUMNS = (
 EULER_COLUMNS = ("Wrist_Rx", "Wrist_Ry", "Wrist_Rz")
 REQUIRED_COLUMNS = POSITION_COLUMNS + EULER_COLUMNS
 
-# OptiTrack Motive uses X-right, Y-up, Z-back for this recording. Gen3 frame
-# 0 uses X-forward, Y-left, Z-up, giving (x, y, z)_robot = (-z, -x, y)_csv.
-MOTIVE_TO_GEN3_BODY_ROTATION = np.array(
-    [[0.0, 0.0, -1.0], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+# CSV: X-left, Y-up, Z-back. Body/world: X-forward, Y-left, Z-up.
+R_BODY_FROM_CSV = np.array(
+    [[0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=float
 )
+# Right-multiplied device-to-canonical basis alignment. Its columns are the
+# canonical X/Y/Z axes expressed in the Motive rigid-body frame: -Y/+X/+Z.
+R_INPUT_ALIGN = np.array(
+    [[0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], dtype=float
+)
+# data/test.csv frame-0 shoulder after the absolute mm-to-m frame conversion.
+SHOULDER_ANCHOR_WORLD = np.array([-0.448858765, -0.064043259, 0.342198364])
 
 
 @dataclass(frozen=True)
@@ -51,32 +57,46 @@ class HumanTrajectory:
 class HumanCSVAdapter:
     """Apply every CSV-to-robot coordinate conversion in one place.
 
-    Wrist angles are fixed to the supplied convention: intrinsic XYZ Euler
-    angles in radians. The default frame transform is the recorded Motive
-    frame to the Gen3 body frame.
+    Wrist angles are extrinsic XYZ Euler angles in degrees, extracted from the
+    normalized Motive XYZW quaternion. CSV positions are millimetres.
     """
 
-    rotation_robot_from_csv: ArrayLike = field(
-        default_factory=lambda: MOTIVE_TO_GEN3_BODY_ROTATION.copy()
+    rotation_body_from_csv: ArrayLike = field(
+        default_factory=lambda: R_BODY_FROM_CSV.copy()
     )
-    translation_robot_from_csv: ArrayLike = field(default_factory=lambda: np.zeros(3))
-    position_scale: float = 1.0
+    position_scale: float = 0.001
+    rotation_input_align: ArrayLike = field(
+        default_factory=lambda: R_INPUT_ALIGN.copy()
+    )
 
     def __post_init__(self) -> None:
-        rotation = np.asarray(self.rotation_robot_from_csv, dtype=float)
-        translation = np.asarray(self.translation_robot_from_csv, dtype=float)
+        rotation = np.asarray(self.rotation_body_from_csv, dtype=float)
         if rotation.shape != (3, 3) or not np.all(np.isfinite(rotation)):
-            raise ValueError("rotation_robot_from_csv must be a finite 3x3 matrix")
+            raise ValueError("rotation_body_from_csv must be a finite 3x3 matrix")
         if not np.allclose(rotation.T @ rotation, np.eye(3), atol=1e-10, rtol=0.0):
-            raise ValueError("rotation_robot_from_csv must be orthogonal")
+            raise ValueError("rotation_body_from_csv must be orthogonal")
         if not np.isclose(np.linalg.det(rotation), 1.0, atol=1e-10, rtol=0.0):
-            raise ValueError("rotation_robot_from_csv must have determinant +1")
-        if translation.shape != (3,) or not np.all(np.isfinite(translation)):
-            raise ValueError("translation_robot_from_csv must be a finite length-3 vector")
+            raise ValueError("rotation_body_from_csv must have determinant +1")
         if not np.isfinite(self.position_scale) or self.position_scale <= 0.0:
             raise ValueError("position_scale must be positive and finite")
-        object.__setattr__(self, "rotation_robot_from_csv", rotation.copy())
-        object.__setattr__(self, "translation_robot_from_csv", translation.copy())
+        input_alignment = np.asarray(self.rotation_input_align, dtype=float)
+        if input_alignment.shape != (3, 3) or not np.all(np.isfinite(input_alignment)):
+            raise ValueError("rotation_input_align must be a finite 3x3 matrix")
+        if not np.allclose(
+            input_alignment.T @ input_alignment, np.eye(3), atol=1e-10, rtol=0.0
+        ):
+            raise ValueError("rotation_input_align must be orthogonal")
+        if not np.isclose(np.linalg.det(input_alignment), 1.0, atol=1e-10, rtol=0.0):
+            raise ValueError("rotation_input_align must have determinant +1")
+        object.__setattr__(self, "rotation_body_from_csv", rotation.copy())
+        object.__setattr__(self, "rotation_input_align", input_alignment.copy())
+
+    def position_to_world(self, point: ArrayLike) -> Vector:
+        """Apply ``p_world = R_body_from_csv @ (scale * p_csv)``."""
+        position = np.asarray(point, dtype=float)
+        if position.shape != (3,) or not np.all(np.isfinite(position)):
+            raise ValueError("CSV position must be a finite length-3 vector")
+        return self.rotation_body_from_csv @ (self.position_scale * position)
 
     def adapt_frame(
         self,
@@ -89,17 +109,22 @@ class HumanCSVAdapter:
         hand_orientation_csv = wrist_euler_to_rotation(
             wrist_euler,
             order="xyz",
-            degrees=False,
-            convention="intrinsic",
+            degrees=True,
+            convention="extrinsic",
         )
-        return transform_human_to_robot_body_frame(
-            self.position_scale * np.asarray(shoulder, dtype=float),
-            self.position_scale * np.asarray(elbow, dtype=float),
-            self.position_scale * np.asarray(wrist, dtype=float),
-            hand_orientation_csv,
-            rotation_robot_from_human=self.rotation_robot_from_csv,
-            translation_robot_from_human=self.translation_robot_from_csv,
+        converted_points = tuple(
+            self.position_to_world(point) for point in (shoulder, elbow, wrist)
         )
+
+        # R_wrist_csv maps Motive device axes into CSV world axes. The left
+        # product changes world basis; the right product changes the local
+        # device basis into canonical hand X(pointing), Y(palm), Z(thumb).
+        hand_orientation_world = (
+            self.rotation_body_from_csv
+            @ hand_orientation_csv
+            @ self.rotation_input_align
+        )
+        return (*converted_points, hand_orientation_world)
 
 
 def load_human_trajectory_csv(
@@ -113,6 +138,8 @@ def load_human_trajectory_csv(
         raise ValueError(f"CSV is missing required columns: {missing}")
 
     values = table.loc[:, REQUIRED_COLUMNS].to_numpy(dtype=float)
+    if len(values) == 0:
+        raise ValueError("CSV must contain at least one frame")
     if not np.all(np.isfinite(values)):
         bad_rows = np.flatnonzero(~np.isfinite(values).all(axis=1))
         raise ValueError(f"CSV contains non-finite required values in rows {bad_rows.tolist()}")
@@ -123,7 +150,6 @@ def load_human_trajectory_csv(
     elbows = np.empty((frame_count, 3))
     wrists = np.empty((frame_count, 3))
     hand_orientations = np.empty((frame_count, 3, 3))
-
     for frame, row in enumerate(values):
         shoulder, elbow, wrist, hand = converter.adapt_frame(
             row[0:3], row[3:6], row[6:9], row[9:12]
