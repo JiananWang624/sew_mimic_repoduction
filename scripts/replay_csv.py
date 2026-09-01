@@ -17,8 +17,12 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
+from sew_mimic.config import CONFIG, project_path  # noqa: E402
 from sew_mimic.csv_adapter import (  # noqa: E402
     R_BODY_FROM_CSV,
+    WRIST_EULER_CONVENTION,
+    WRIST_EULER_DEGREES,
+    WRIST_EULER_ORDER,
     HumanCSVAdapter,
     HumanTrajectory,
     load_human_trajectory_csv,
@@ -48,6 +52,8 @@ OUTPUT_COLUMNS = (
     "wrist_error_deg",
 )
 SEGMENT_COLUMNS = ("bite_id", "motive_frame", "event", "event_frame_index")
+_HUMAN_CSV_CONFIG = CONFIG["human_csv"]
+_REPLAY_CONFIG = CONFIG["replay_csv"]
 
 
 def load_segment_boundaries(path: Path) -> np.ndarray:
@@ -319,12 +325,12 @@ def replay_in_mujoco(
 
     with mujoco.viewer.launch_passive(model, data) as viewer:
         viewer.user_scn.ngeom = 19
-        viewer.cam.lookat[:] = trajectory_world.shoulders[0] + np.array(
-            [0.0, -0.2, 0.0]
+        viewer.cam.lookat[:] = trajectory_world.shoulders[0] + np.asarray(
+            _REPLAY_CONFIG["camera_lookat_offset_m"], dtype=float
         )
-        viewer.cam.distance = 1.8
-        viewer.cam.azimuth = 145.0
-        viewer.cam.elevation = -18.0
+        viewer.cam.distance = float(_REPLAY_CONFIG["camera_distance_m"])
+        viewer.cam.azimuth = float(_REPLAY_CONFIG["camera_azimuth_deg"])
+        viewer.cam.elevation = float(_REPLAY_CONFIG["camera_elevation_deg"])
         start_time = time.perf_counter()
 
         for frame in range(frame_count):
@@ -409,20 +415,30 @@ def replay_in_mujoco(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input", type=Path, default=PROJECT_ROOT / "data" / "test.csv")
+    parser.add_argument(
+        "--input", type=Path, default=project_path(_HUMAN_CSV_CONFIG["input_path"])
+    )
     parser.add_argument(
         "--output",
         type=Path,
-        default=PROJECT_ROOT / "output" / "test_retargeted_mounted.csv",
+        default=project_path(_REPLAY_CONFIG["output_path"]),
     )
     parser.add_argument(
         "--plot",
         type=Path,
-        default=PROJECT_ROOT / "output" / "test_trajectory_diagnostics.png",
+        default=project_path(_REPLAY_CONFIG["plot_path"]),
     )
-    parser.add_argument("--fps", type=float, default=100.0)
-    parser.add_argument("--jump-threshold", type=float, default=0.25)
-    parser.add_argument("--position-scale", type=float, default=0.001)
+    parser.add_argument("--fps", type=float, default=float(_REPLAY_CONFIG["fps"]))
+    parser.add_argument(
+        "--jump-threshold",
+        type=float,
+        default=float(_REPLAY_CONFIG["jump_threshold_rad"]),
+    )
+    parser.add_argument(
+        "--position-scale",
+        type=float,
+        default=float(_HUMAN_CSV_CONFIG["position_scale_to_m"]),
+    )
     parser.add_argument(
         "--rotation-body-from-csv",
         type=float,
@@ -434,7 +450,7 @@ def main() -> int:
     parser.add_argument(
         "--viewer-max-frames",
         type=int,
-        default=0,
+        default=int(_REPLAY_CONFIG["viewer_max_frames"]),
         help="0 plays every frame; a positive value is useful for a viewer smoke test",
     )
     arguments = parser.parse_args()
@@ -455,8 +471,10 @@ def main() -> int:
     base_body_id = int(robot.frame_body_ids[0])
     print("R_body_from_csv:")
     print(adapter.rotation_body_from_csv)
+    wrist_units = "degrees" if WRIST_EULER_DEGREES else "radians"
     print(
-        "wrist convention: extrinsic XYZ degrees; "
+        f"wrist convention: {WRIST_EULER_CONVENTION} "
+        f"{WRIST_EULER_ORDER.upper()} {wrist_units}; "
         "H_body=R_body_from_csv@R_wrist_csv@R_input_align"
     )
     print("R_input_align:")

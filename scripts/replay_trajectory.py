@@ -16,8 +16,12 @@ import numpy as np
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
+from sew_mimic.config import CONFIG, project_path  # noqa: E402
 from sew_mimic.kinematics import Gen3Kinematics, gen3_kinematics  # noqa: E402
 from sew_mimic.retarget import sew_mimic  # noqa: E402
+
+
+_SYNTHETIC_CONFIG = CONFIG["synthetic_replay"]
 
 
 def make_synthetic_trajectory(
@@ -198,13 +202,19 @@ def replay_in_mujoco(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--duration", type=float, default=10.0)
-    parser.add_argument("--fps", type=float, default=50.0)
-    parser.add_argument("--jump-threshold", type=float, default=0.25)
+    parser.add_argument(
+        "--duration", type=float, default=float(_SYNTHETIC_CONFIG["duration_s"])
+    )
+    parser.add_argument("--fps", type=float, default=float(_SYNTHETIC_CONFIG["fps"]))
+    parser.add_argument(
+        "--jump-threshold",
+        type=float,
+        default=float(_SYNTHETIC_CONFIG["jump_threshold_rad"]),
+    )
     parser.add_argument(
         "--output",
         type=Path,
-        default=PROJECT_ROOT / "output" / "synthetic_trajectory_diagnostics.png",
+        default=project_path(_SYNTHETIC_CONFIG["plot_path"]),
     )
     parser.add_argument("--no-viewer", action="store_true")
     parser.add_argument("--no-show", action="store_true")

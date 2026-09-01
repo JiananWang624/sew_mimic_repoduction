@@ -17,11 +17,15 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
+from sew_mimic.config import CONFIG, project_path  # noqa: E402
 from sew_mimic.csv_adapter import (  # noqa: E402
     R_BODY_FROM_CSV,
     R_INPUT_ALIGN,
     REQUIRED_COLUMNS,
     SHOULDER_ANCHOR_WORLD,
+    WRIST_EULER_CONVENTION,
+    WRIST_EULER_DEGREES,
+    WRIST_EULER_ORDER,
     HumanCSVAdapter,
 )
 from sew_mimic.human_input import (  # noqa: E402
@@ -40,6 +44,10 @@ from sew_mimic.mounting import (  # noqa: E402
     world_trajectory_to_base,
 )
 from sew_mimic.retarget import align_axis, align_wrist, sew_mimic  # noqa: E402
+
+
+_HUMAN_CSV_CONFIG = CONFIG["human_csv"]
+_FIRST_FRAME_CONFIG = CONFIG["first_frame_validation"]
 
 
 def _angle_deg(first: np.ndarray, second: np.ndarray) -> float:
@@ -313,10 +321,12 @@ def show_first_frame(
     site_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "pinch_site")
 
     with mujoco.viewer.launch_passive(model, data) as viewer:
-        viewer.cam.lookat[:] = human_positions[0] + np.array([0.0, -0.2, 0.0])
-        viewer.cam.distance = 1.8
-        viewer.cam.azimuth = 145.0
-        viewer.cam.elevation = -18.0
+        viewer.cam.lookat[:] = human_positions[0] + np.asarray(
+            _FIRST_FRAME_CONFIG["camera_lookat_offset_m"], dtype=float
+        )
+        viewer.cam.distance = float(_FIRST_FRAME_CONFIG["camera_distance_m"])
+        viewer.cam.azimuth = float(_FIRST_FRAME_CONFIG["camera_azimuth_deg"])
+        viewer.cam.elevation = float(_FIRST_FRAME_CONFIG["camera_elevation_deg"])
         start_time = time.perf_counter()
 
         while viewer.is_running():
@@ -362,19 +372,23 @@ def show_first_frame(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input", type=Path, default=PROJECT_ROOT / "data" / "test.csv")
-    parser.add_argument("--q0-seconds", type=float, default=3.0)
+    parser.add_argument(
+        "--input", type=Path, default=project_path(_HUMAN_CSV_CONFIG["input_path"])
+    )
+    parser.add_argument(
+        "--q0-seconds", type=float, default=float(_FIRST_FRAME_CONFIG["q0_seconds"])
+    )
     parser.add_argument(
         "--solution-seconds",
         type=float,
-        default=0.0,
+        default=float(_FIRST_FRAME_CONFIG["solution_seconds"]),
         help="0 keeps q_final visible until the viewer is closed",
     )
     parser.add_argument("--no-viewer", action="store_true")
     parser.add_argument(
         "--screenshot",
         type=Path,
-        default=PROJECT_ROOT / "output" / "first_frame_geometric_diagnostic.png",
+        default=project_path(_FIRST_FRAME_CONFIG["screenshot_path"]),
     )
     arguments = parser.parse_args()
 
@@ -394,16 +408,16 @@ def main() -> int:
     )
     np.testing.assert_allclose(np.linalg.det(R_BODY_FROM_CSV), 1.0, atol=0.0, rtol=0.0)
     adapter = HumanCSVAdapter()
-    wrist_euler_deg = row[9:12]
+    wrist_euler = row[9:12]
     rotation_wrist_csv = wrist_euler_to_rotation(
-        wrist_euler_deg,
-        order="xyz",
-        degrees=True,
-        convention="extrinsic",
+        wrist_euler,
+        order=WRIST_EULER_ORDER,
+        degrees=WRIST_EULER_DEGREES,
+        convention=WRIST_EULER_CONVENTION,
     )
     hand_body_raw = R_BODY_FROM_CSV @ rotation_wrist_csv
     shoulder_body, elbow_body, wrist_body, hand_body = adapter.adapt_frame(
-        shoulder_csv, elbow_csv, wrist_csv, wrist_euler_deg
+        shoulder_csv, elbow_csv, wrist_csv, wrist_euler
     )
     np.testing.assert_allclose(hand_body, hand_body_raw @ R_INPUT_ALIGN, atol=5e-16)
     np.testing.assert_allclose(
@@ -541,9 +555,16 @@ def main() -> int:
     print(f"upper_error_deg: {upper_error:.6e}")
     print(f"lower_error_deg: {lower_error:.6e}")
     print(f"joint_limit_valid: {diagnostics['joint_limit_valid']}")
-    print("\nraw Wrist_Rx/Ry/Rz (deg):", np.array2string(wrist_euler_deg, precision=9))
-    print("detected Motive convention: normalized XYZW quaternion -> extrinsic XYZ degrees")
-    print("R_wrist_csv = Rz(rz) @ Ry(ry) @ Rx(rx):")
+    wrist_units = "degrees" if WRIST_EULER_DEGREES else "radians"
+    print(
+        f"\nraw Wrist_Rx/Ry/Rz ({wrist_units}):",
+        np.array2string(wrist_euler, precision=9),
+    )
+    print(
+        "detected Motive convention: normalized XYZW quaternion -> "
+        f"{WRIST_EULER_CONVENTION} {WRIST_EULER_ORDER.upper()} {wrist_units}"
+    )
+    print("R_wrist_csv from configured Euler convention:")
     print(np.array2string(rotation_wrist_csv, precision=9, suppress_small=True))
     print("H_body_raw = R_body_from_csv @ R_wrist_csv:")
     print(np.array2string(hand_body_raw, precision=9, suppress_small=True))

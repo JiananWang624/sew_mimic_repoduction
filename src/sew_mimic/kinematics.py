@@ -9,19 +9,20 @@ import mujoco
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
+from .config import CONFIG, project_path
 from .geometry import rot
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-GEN3_SCENE_PATH = PROJECT_ROOT / "assets" / "kinova_gen3" / "scene.xml"
+_ROBOT_CONFIG = CONFIG["robot"]
+GEN3_SCENE_PATH = project_path(_ROBOT_CONFIG["model_path"])
 
 Matrix = NDArray[np.float64]
 Vector = NDArray[np.float64]
 
 # Menagerie's native h3/h5 axes oppose the corresponding joint-anchor chain;
 # the sign choice is validated statistically over the Gen3 joint limits.
-UPPER_ARM_PROXY_SIGN = -1.0
-LOWER_ARM_PROXY_SIGN = -1.0
+UPPER_ARM_PROXY_SIGN = float(_ROBOT_CONFIG["upper_arm_proxy_sign"])
+LOWER_ARM_PROXY_SIGN = float(_ROBOT_CONFIG["lower_arm_proxy_sign"])
 
 
 def load_mujoco_model(xml_path: str | Path) -> mujoco.MjModel:

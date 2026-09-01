@@ -14,13 +14,13 @@ import numpy as np
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
+from sew_mimic.config import CONFIG  # noqa: E402
 from sew_mimic.kinematics import Gen3Kinematics, gen3_kinematics  # noqa: E402
 from sew_mimic.retarget import align_wrist  # noqa: E402
 
 
-FIRST_FRAME_Q_AFTER_LOWER = np.array(
-    [1.046125445, 1.485342602, -0.788082060, 1.366690019], dtype=float
-)
+_WRIST_CONFIG = CONFIG["wrist_validation"]
+FIRST_FRAME_Q_AFTER_LOWER = np.asarray(_WRIST_CONFIG["fixed_q1_q4"], dtype=float)
 
 
 @dataclass(frozen=True)
@@ -188,8 +188,8 @@ def validate_tool_axis_convention(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--samples", type=int, default=1000)
-    parser.add_argument("--seed", type=int, default=20260901)
+    parser.add_argument("--samples", type=int, default=int(_WRIST_CONFIG["samples"]))
+    parser.add_argument("--seed", type=int, default=int(_WRIST_CONFIG["seed"]))
     arguments = parser.parse_args()
 
     wrist = validate_align_wrist(arguments.samples, arguments.seed)

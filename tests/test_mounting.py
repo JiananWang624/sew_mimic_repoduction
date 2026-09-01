@@ -3,6 +3,7 @@ import numpy as np
 from sew_mimic.csv_adapter import SHOULDER_ANCHOR_WORLD
 from sew_mimic.kinematics import GEN3_SCENE_PATH, Gen3Kinematics, load_mujoco_model
 from sew_mimic.mounting import (
+    DEFAULT_ROBOT_WORLD_OFFSET,
     GEN3_JOINT1_IN_BASE,
     HUMANOID_MOUNTING_NAME,
     evaluate_root_orientations,
@@ -77,7 +78,9 @@ def test_fixed_humanoid_mounting_is_phase_one_selection() -> None:
 
 
 def test_right_arm_root_pose_uses_explicit_joint1_offset() -> None:
-    robot, data = load_humanoid_mounted_gen3(SHOULDER_ANCHOR_WORLD)
+    robot, data = load_humanoid_mounted_gen3(
+        SHOULDER_ANCHOR_WORLD, robot_world_offset=(0.0, 0.0, 0.0)
+    )
     base_body_id = int(robot.frame_body_ids[0])
     joint1_world = data.xanchor[int(robot.joint_ids[0])]
     expected_base = right_arm_base_position(SHOULDER_ANCHOR_WORLD)
@@ -99,6 +102,34 @@ def test_right_arm_root_pose_uses_explicit_joint1_offset() -> None:
         @ (joint1_world - data.xpos[base_body_id])
     )
     np.testing.assert_allclose(recovered_offset, GEN3_JOINT1_IN_BASE, atol=5e-16)
+
+
+def test_humanoid_mounting_accepts_xyz_world_offset() -> None:
+    offset = np.array([0.12, -0.08, 0.30])
+    robot, data = load_humanoid_mounted_gen3(SHOULDER_ANCHOR_WORLD, offset)
+    base_body_id = int(robot.frame_body_ids[0])
+
+    np.testing.assert_allclose(
+        data.xanchor[int(robot.joint_ids[0])],
+        SHOULDER_ANCHOR_WORLD + offset,
+        atol=5e-16,
+    )
+    np.testing.assert_allclose(
+        data.xpos[base_body_id],
+        right_arm_base_position(SHOULDER_ANCHOR_WORLD + offset),
+        atol=5e-16,
+    )
+
+
+def test_humanoid_mounting_uses_configured_default_world_offset() -> None:
+    offset = np.asarray(DEFAULT_ROBOT_WORLD_OFFSET, dtype=float)
+    robot, data = load_humanoid_mounted_gen3(SHOULDER_ANCHOR_WORLD)
+
+    np.testing.assert_allclose(
+        data.xanchor[int(robot.joint_ids[0])],
+        SHOULDER_ANCHOR_WORLD + offset,
+        atol=5e-16,
+    )
 
 
 def test_world_trajectory_to_base_round_trip() -> None:

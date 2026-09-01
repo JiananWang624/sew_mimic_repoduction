@@ -8,6 +8,7 @@ import mujoco
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
+from .config import CONFIG
 from .geometry import rot
 from .kinematics import Gen3Kinematics, GEN3_SCENE_PATH, load_mujoco_model
 
@@ -15,8 +16,14 @@ from .kinematics import Gen3Kinematics, GEN3_SCENE_PATH, load_mujoco_model
 Matrix = NDArray[np.float64]
 Vector = NDArray[np.float64]
 
-HUMANOID_MOUNTING_NAME = "Rx(+90deg)"
-GEN3_JOINT1_IN_BASE = np.array([0.0, 0.0, 0.15643])
+_ROBOT_CONFIG = CONFIG["robot"]
+HUMANOID_MOUNTING_NAME = str(_ROBOT_CONFIG["mounting_name"])
+GEN3_JOINT1_IN_BASE = np.asarray(
+    _ROBOT_CONFIG["joint1_in_base_m"], dtype=float
+)
+DEFAULT_ROBOT_WORLD_OFFSET = tuple(
+    float(value) for value in _ROBOT_CONFIG["world_offset_m"]
+)
 
 
 @dataclass(frozen=True)
@@ -154,21 +161,26 @@ def load_mounted_gen3(
 
 def load_humanoid_mounted_gen3(
     human_shoulder_world: ArrayLike,
+    robot_world_offset: ArrayLike = DEFAULT_ROBOT_WORLD_OFFSET,
 ) -> tuple[Gen3Kinematics, mujoco.MjData]:
-    """Load Gen3 with the explicit fixed right-arm root pose."""
+    """Load Gen3 with the fixed right-arm pose plus an XYZ world offset."""
     shoulder = np.asarray(human_shoulder_world, dtype=float)
+    offset = np.asarray(robot_world_offset, dtype=float)
+    if offset.shape != (3,) or not np.all(np.isfinite(offset)):
+        raise ValueError("robot_world_offset must be a finite length-3 vector")
+    robot_shoulder = shoulder + offset
     robot = Gen3Kinematics(load_mujoco_model(GEN3_SCENE_PATH))
     model = robot.model
     base_body_id = int(robot.frame_body_ids[0])
     model.body_quat[base_body_id] = _matrix_to_quaternion(humanoid_root_rotation())
-    model.body_pos[base_body_id] = right_arm_base_position(shoulder)
+    model.body_pos[base_body_id] = right_arm_base_position(robot_shoulder)
 
     data = mujoco.MjData(model)
     mujoco.mj_forward(model, data)
     joint1_world = data.xanchor[int(robot.joint_ids[0])]
-    if not np.allclose(joint1_world, shoulder, atol=1e-12, rtol=0.0):
+    if not np.allclose(joint1_world, robot_shoulder, atol=1e-12, rtol=0.0):
         raise RuntimeError(
-            "right-arm root pose did not place Gen3 joint_1 at the human shoulder"
+            "right-arm root pose did not place Gen3 joint_1 at the requested position"
         )
     return robot, data
 

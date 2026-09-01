@@ -12,8 +12,12 @@ import numpy as np
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
+from sew_mimic.config import CONFIG  # noqa: E402
 from sew_mimic.kinematics import Gen3Kinematics, gen3_kinematics  # noqa: E402
 from sew_mimic.retarget import sew_mimic  # noqa: E402
+
+
+_SELF_CONSISTENCY_CONFIG = CONFIG["self_consistency"]
 
 
 def _random_configuration(
@@ -150,8 +154,10 @@ def run_self_consistency(samples: int, seed: int) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--samples", type=int, default=1000)
-    parser.add_argument("--seed", type=int, default=20260831)
+    parser.add_argument(
+        "--samples", type=int, default=int(_SELF_CONSISTENCY_CONFIG["samples"])
+    )
+    parser.add_argument("--seed", type=int, default=int(_SELF_CONSISTENCY_CONFIG["seed"]))
     arguments = parser.parse_args()
     return run_self_consistency(arguments.samples, arguments.seed)
 

@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 from numpy.typing import ArrayLike, NDArray
 
+from .config import CONFIG
 from .human_input import wrist_euler_to_rotation
 
 
@@ -29,17 +30,17 @@ POSITION_COLUMNS = (
 EULER_COLUMNS = ("Wrist_Rx", "Wrist_Ry", "Wrist_Rz")
 REQUIRED_COLUMNS = POSITION_COLUMNS + EULER_COLUMNS
 
-# CSV: X-left, Y-up, Z-back. Body/world: X-forward, Y-left, Z-up.
-R_BODY_FROM_CSV = np.array(
-    [[0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=float
+_HUMAN_CSV_CONFIG = CONFIG["human_csv"]
+R_BODY_FROM_CSV = np.asarray(
+    _HUMAN_CSV_CONFIG["rotation_body_from_csv"], dtype=float
 )
-# Right-multiplied device-to-canonical basis alignment. Its columns are the
-# canonical X/Y/Z axes expressed in the Motive rigid-body frame: -Y/+X/+Z.
-R_INPUT_ALIGN = np.array(
-    [[0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], dtype=float
+R_INPUT_ALIGN = np.asarray(_HUMAN_CSV_CONFIG["rotation_input_align"], dtype=float)
+SHOULDER_ANCHOR_WORLD = np.asarray(
+    _HUMAN_CSV_CONFIG["reference_shoulder_world_m"], dtype=float
 )
-# data/test.csv frame-0 shoulder after the absolute mm-to-m frame conversion.
-SHOULDER_ANCHOR_WORLD = np.array([-0.448858765, -0.064043259, 0.342198364])
+WRIST_EULER_ORDER = str(_HUMAN_CSV_CONFIG["wrist_euler_order"])
+WRIST_EULER_DEGREES = bool(_HUMAN_CSV_CONFIG["wrist_euler_degrees"])
+WRIST_EULER_CONVENTION = str(_HUMAN_CSV_CONFIG["wrist_euler_convention"])
 
 
 @dataclass(frozen=True)
@@ -57,17 +58,20 @@ class HumanTrajectory:
 class HumanCSVAdapter:
     """Apply every CSV-to-robot coordinate conversion in one place.
 
-    Wrist angles are extrinsic XYZ Euler angles in degrees, extracted from the
-    normalized Motive XYZW quaternion. CSV positions are millimetres.
+    Position scale, frame rotations, and wrist Euler convention come from the
+    project configuration unless explicitly overridden.
     """
 
     rotation_body_from_csv: ArrayLike = field(
         default_factory=lambda: R_BODY_FROM_CSV.copy()
     )
-    position_scale: float = 0.001
+    position_scale: float = float(_HUMAN_CSV_CONFIG["position_scale_to_m"])
     rotation_input_align: ArrayLike = field(
         default_factory=lambda: R_INPUT_ALIGN.copy()
     )
+    wrist_euler_order: str = WRIST_EULER_ORDER
+    wrist_euler_degrees: bool = WRIST_EULER_DEGREES
+    wrist_euler_convention: str = WRIST_EULER_CONVENTION
 
     def __post_init__(self) -> None:
         rotation = np.asarray(self.rotation_body_from_csv, dtype=float)
@@ -108,9 +112,9 @@ class HumanCSVAdapter:
         """Convert one CSV frame into robot-body-frame ``(s, e, w, H)``."""
         hand_orientation_csv = wrist_euler_to_rotation(
             wrist_euler,
-            order="xyz",
-            degrees=True,
-            convention="extrinsic",
+            order=self.wrist_euler_order,
+            degrees=self.wrist_euler_degrees,
+            convention=self.wrist_euler_convention,
         )
         converted_points = tuple(
             self.position_to_world(point) for point in (shoulder, elbow, wrist)

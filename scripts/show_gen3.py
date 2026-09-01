@@ -15,13 +15,14 @@ import mujoco  # noqa: E402
 import mujoco.viewer  # noqa: E402
 
 from sew_mimic.kinematics import (  # noqa: E402
+    GEN3_SCENE_PATH,
     load_mujoco_model,
     revolute_joint_ids,
     validate_gen3_arm,
 )
 
 
-MODEL_PATH = PROJECT_ROOT / "assets" / "kinova_gen3" / "scene.xml"
+MODEL_PATH = GEN3_SCENE_PATH
 
 
 def _object_name(model: mujoco.MjModel, object_type: mujoco.mjtObj, object_id: int) -> str:
