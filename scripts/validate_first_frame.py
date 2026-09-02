@@ -561,7 +561,7 @@ def main() -> int:
         np.array2string(wrist_euler, precision=9),
     )
     print(
-        "detected Motive convention: normalized XYZW quaternion -> "
+        "configured wrist convention: "
         f"{WRIST_EULER_CONVENTION} {WRIST_EULER_ORDER.upper()} {wrist_units}"
     )
     print("R_wrist_csv from configured Euler convention:")
