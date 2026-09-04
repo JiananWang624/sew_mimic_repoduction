@@ -10,10 +10,11 @@ from .evaluation import (
 )
 from .status import SolverStatus
 from .task_point import compute_human_task_point
-from .types import HumanArmTarget, SolverDiagnostics, SolverResult
+from .types import ExactSewTarget, HumanArmTarget, SolverDiagnostics, SolverResult
 
 __all__ = [
     "EndEffectorMetrics",
+    "ExactSewTarget",
     "HumanArmTarget",
     "SolverDiagnostics",
     "SolverResult",
