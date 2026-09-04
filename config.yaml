@@ -40,6 +40,13 @@ human_csv:
   # data/test.csv 第一帧 shoulder 的期望 world 坐标，供诊断和测试使用，单位 m。
   reference_shoulder_world_m: [-0.448858765, -0.064043259, 0.342198364]
 
+task_point:
+  # Canonical human point tracked by true end-effector position metrics.
+  # "wrist" uses Wrist_X/Y/Z directly; no anatomical palm offset is assumed.
+  mode: wrist
+  # Fixed wrist-to-task offset in canonical hand-frame XYZ coordinates, metres.
+  human_wrist_to_task_offset_m: [0.0, 0.0, 0.0]
+
 replay_csv:
   # 完整 CSV retarget 后关节角和误差的默认输出文件。
   output_path: output/test_retargeted_mounted.csv

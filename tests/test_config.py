@@ -11,6 +11,10 @@ from sew_mimic.csv_adapter import (
     WRIST_EULER_ORDER,
 )
 from sew_mimic.mounting import DEFAULT_ROBOT_WORLD_OFFSET
+from sew_mimic.common.task_point import (
+    DEFAULT_HUMAN_WRIST_TO_TASK_OFFSET_M,
+    DEFAULT_TASK_POINT_MODE,
+)
 
 
 def test_project_config_loads_from_the_single_root_yaml() -> None:
@@ -20,6 +24,7 @@ def test_project_config_loads_from_the_single_root_yaml() -> None:
     assert set(config) == {
         "robot",
         "human_csv",
+        "task_point",
         "replay_csv",
         "synthetic_replay",
         "first_frame_validation",
@@ -45,6 +50,10 @@ def test_configured_coordinate_and_mounting_defaults_preserve_behavior() -> None
     offset = np.asarray(DEFAULT_ROBOT_WORLD_OFFSET, dtype=float)
     assert offset.shape == (3,)
     assert np.all(np.isfinite(offset))
+    assert DEFAULT_TASK_POINT_MODE == "wrist"
+    np.testing.assert_array_equal(
+        DEFAULT_HUMAN_WRIST_TO_TASK_OFFSET_M, np.zeros(3)
+    )
 
 
 def test_load_config_rejects_a_non_mapping_document(tmp_path: Path) -> None:

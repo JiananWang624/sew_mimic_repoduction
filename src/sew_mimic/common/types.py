@@ -13,6 +13,41 @@ from .status import SolverStatus
 
 
 Vector = NDArray[np.float64]
+Matrix = NDArray[np.float64]
+
+_ROTATION_MATRIX_TOL = 1e-10
+
+
+def _vector3(value: object, name: str) -> Vector:
+    vector = np.asarray(value, dtype=float)
+    if vector.shape != (3,):
+        raise ValueError(f"{name} must have shape (3,), got {vector.shape}")
+    if not np.all(np.isfinite(vector)):
+        raise ValueError(f"{name} must contain only finite values")
+    return vector.copy()
+
+
+def _rotation3(value: object, name: str) -> Matrix:
+    matrix = np.asarray(value, dtype=float)
+    if matrix.shape != (3, 3):
+        raise ValueError(f"{name} must have shape (3, 3), got {matrix.shape}")
+    if not np.all(np.isfinite(matrix)):
+        raise ValueError(f"{name} must contain only finite values")
+    if not np.allclose(
+        matrix.T @ matrix,
+        np.eye(3),
+        atol=_ROTATION_MATRIX_TOL,
+        rtol=0.0,
+    ):
+        raise ValueError(f"{name} must be orthonormal")
+    if not np.isclose(
+        np.linalg.det(matrix),
+        1.0,
+        atol=_ROTATION_MATRIX_TOL,
+        rtol=0.0,
+    ):
+        raise ValueError(f"{name} must have determinant +1")
+    return matrix.copy()
 
 
 def _optional_finite(value: float | None, name: str) -> float | None:
@@ -22,6 +57,29 @@ def _optional_finite(value: float | None, name: str) -> float | None:
     if not math.isfinite(number):
         raise ValueError(f"{name} must be finite when present")
     return number
+
+
+@dataclass
+class HumanArmTarget:
+    """One human arm target expressed entirely in one documented frame.
+
+    ``hand_rotation`` maps the canonical hand frame into the containing frame.
+    ``task_point`` is the physical point that an end-effector position solver
+    or evaluator should track.
+    """
+
+    shoulder: Vector
+    elbow: Vector
+    wrist: Vector
+    hand_rotation: Matrix
+    task_point: Vector
+
+    def __post_init__(self) -> None:
+        self.shoulder = _vector3(self.shoulder, "shoulder")
+        self.elbow = _vector3(self.elbow, "elbow")
+        self.wrist = _vector3(self.wrist, "wrist")
+        self.hand_rotation = _rotation3(self.hand_rotation, "hand_rotation")
+        self.task_point = _vector3(self.task_point, "task_point")
 
 
 @dataclass
