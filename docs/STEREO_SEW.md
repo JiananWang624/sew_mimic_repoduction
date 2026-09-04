@@ -35,10 +35,9 @@ inverse = sew.inverse(S, W, psi)
 ```
 
 `e_t` and `e_r` must be finite three-vectors, unit length within `1e-10`, and
-orthogonal within `1e-10`.  Accepted vectors are then minimally normalized to
-remove roundoff.  No project-wide or Gen3 default pair exists in Phase 2B.
-The `[0, 0, -1]`, `[0, 1, 0]` pair used in tests is an official tutorial
-example, **not** the final project reference pair.
+orthogonal within `1e-10`. Accepted vectors are then minimally normalized to
+remove roundoff. The Phase-2B tutorial pair `[0, 0, -1]`, `[0, 1, 0]` is not
+the final project reference; Phase 3 selected the configured pair stated above.
 
 ## Forward map
 
@@ -72,8 +71,8 @@ n_SEW = unit(cross(e_SW, e_CE))
 ```
 
 Using `cross(k_r, e_SW)` is algebraically identical to the `p_SW` expression
-after normalization and avoids a dimensional threshold.  WARP will later use
-the returned half-plane with its own geometry; Exact-SEW will use the same
+after normalization and avoids a dimensional threshold. The generic WARP core
+uses the returned half-plane with fixed-link geometry; Exact-SEW uses the same
 forward angle to constrain a robot configuration.
 
 ## Singularities and tolerances
@@ -89,10 +88,10 @@ reference vectors are ordinary invalid inputs.
 
 ## Scope and attribution
 
-This module deliberately has no Jacobian, WARP implementation, elbow
-position solver, Gen3 IK, or final Gen3 reference-vector choice.  Phase 3
-must choose a reference pair relative to the actual Gen3 workspace and
-canonical frame, with the singular half-line kept away from useful motions.
+This module deliberately contains only the Stereo-SEW representation, not an
+elbow-position solver or Gen3 IK. Phase 3 selected the final reference pair
+relative to the actual Gen3 workspace and canonical frame; the downstream
+WARP and Exact-SEW packages consume this representation without redefining it.
 
 The equations are reimplemented (not copied) from the official
 [Stereo-SEW repository](https://github.com/rpiRobotics/stereo-sew), especially

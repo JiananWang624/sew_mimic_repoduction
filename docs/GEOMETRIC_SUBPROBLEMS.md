@@ -63,5 +63,5 @@ and its official BSD-3-Clause reference implementation:
 [rpiRobotics/ik-geo](https://github.com/rpiRobotics/ik-geo). This repository
 implements the equation independently rather than copying the third-party
 source.
-The SP3 primitive is retained independently for later WARP elbow reconstruction;
-this document does not define or implement WARP.
+The SP3 primitive is used by both the generic WARP elbow reconstruction and the
+Exact-SEW backend; this document defines only the independent subproblem.

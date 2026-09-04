@@ -5,3 +5,7 @@ __pycache__/
 
 tmp/
 
+# Regenerable validation outputs. Existing tracked diagnostic artifacts remain tracked.
+output/baseline_metrics.csv
+output/comparison_frames.csv
+output/comparison_summary.json
