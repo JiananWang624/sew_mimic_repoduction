@@ -11,6 +11,8 @@ paper's inconsistent pseudocode, backed by the referenced IK-Geo implementation.
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
+from typing import Optional
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -20,6 +22,25 @@ Vector = NDArray[np.float64]
 Matrix = NDArray[np.float64]
 
 _DEGENERACY_TOL = 1e-12
+SP3_EXACT_TOL = 1e-10
+_SP3_INTERSECTION_TOL = 64.0 * np.finfo(float).eps
+_SP3_PROJECTION_TOL = 64.0 * np.finfo(float).eps
+
+
+@dataclass(frozen=True)
+class SP3Result:
+    """Deterministic candidates returned by :func:`sp3`.
+
+    ``residuals`` are the independently recomputed distance residuals,
+    ``abs(norm(rot(k, theta) @ p1 - p2) - d)``.  A candidate is exact only
+    when its residual is within the scale-aware SP3 tolerance.
+    """
+
+    angles: tuple[float, ...]
+    is_exact: tuple[bool, ...]
+    residuals: tuple[float, ...]
+    degenerate: bool
+    message: Optional[str] = None
 
 
 def _vector3(value: ArrayLike, name: str) -> Vector:
@@ -156,3 +177,241 @@ def sp2(
         theta2 = np.array([theta2[-1], theta2[0]])
 
     return np.column_stack((theta1, theta2))
+
+
+def _wrap_angle(angle: float) -> float:
+    """Wrap an angle to the half-open interval ``[-pi, pi)``."""
+    wrapped = (angle + math.pi) % (2.0 * math.pi) - math.pi
+    # Avoid returning positive zero from a platform-dependent modulo path.
+    return 0.0 if wrapped == 0.0 else wrapped
+
+
+def _stable_norm(vector: Vector) -> float:
+    """Return a finite Euclidean norm without intermediate overflow."""
+    values = tuple(float(component) for component in vector)
+    if not all(math.isfinite(component) for component in values):
+        raise ValueError("SP3 encountered a non-finite intermediate vector")
+    return math.hypot(*values)
+
+
+def _sp3_dot(vector1: Vector, vector2: Vector) -> float:
+    """Compute a three-dimensional dot product with compensated summation."""
+    return math.fsum(float(a) * float(b) for a, b in zip(vector1, vector2))
+
+
+def _sp3_unit(value: ArrayLike, name: str) -> Vector:
+    """Normalize an SP3 axis without overflowing its norm calculation."""
+    vector = _vector3(value, name)
+    component_scale = max(abs(float(component)) for component in vector)
+    if component_scale == 0.0:
+        raise ValueError(f"{name} must be nonzero")
+    scaled = vector / component_scale
+    scaled_norm = _stable_norm(scaled)
+    if scaled_norm <= _DEGENERACY_TOL / component_scale:
+        raise ValueError(f"{name} must be nonzero")
+    return scaled / scaled_norm
+
+
+def _sp3_residual(
+    p1: Vector,
+    p2: Vector,
+    axis: Vector,
+    distance: float,
+    angle: float,
+    length_scale: float,
+) -> float:
+    if not math.isfinite(angle):
+        raise ValueError("SP3 produced a non-finite candidate angle")
+    normalized_residual = abs(_stable_norm(rot(axis, angle) @ p1 - p2) - distance)
+    residual = normalized_residual * length_scale
+    if not math.isfinite(residual):
+        raise ValueError("SP3 residual is outside the representable floating-point range")
+    return residual
+
+
+def sp3(
+    p1: ArrayLike,
+    p2: ArrayLike,
+    k: ArrayLike,
+    d: float,
+    *,
+    exact_tolerance: float = SP3_EXACT_TOL,
+) -> SP3Result:
+    """Solve IK-Geo Subproblem 3 (circle and sphere).
+
+    The problem is
+
+    ``||rot(k, theta) @ p1 - p2|| = d``.
+
+    The perpendicular components of ``p1`` and ``p2`` to the normalized axis
+    define a sinusoidal dot-product equation.  Its two analytic roots are
+    returned in wrapped ascending angle order.  If the circle and sphere do
+    not intersect, the deterministic extremum gives the continuous
+    least-squares candidate.  Every result is classified from an independent
+    Rodrigues/FK residual rather than from the analytic discriminant.
+
+    This is the direct circle-sphere reduction used by IK-Geo Subproblem 3;
+    it intentionally does not call :func:`sp4`, whose plane-normal
+    normalization changes the meaning of this problem.
+    """
+    vector1 = _vector3(p1, "p1")
+    vector2 = _vector3(p2, "p2")
+    axis = _sp3_unit(k, "k")
+    distance = _scalar(d, "d")
+    if distance < 0.0:
+        raise ValueError("d must be nonnegative")
+    tolerance = _scalar(exact_tolerance, "exact_tolerance")
+    if tolerance < 0.0:
+        raise ValueError("exact_tolerance must be nonnegative")
+
+    length_scale = max(
+        1.0,
+        *(abs(float(component)) for component in vector1),
+        *(abs(float(component)) for component in vector2),
+        distance,
+    )
+    scaled_vector1 = vector1 / length_scale
+    scaled_vector2 = vector2 / length_scale
+    scaled_distance = distance / length_scale
+    norm1 = _stable_norm(scaled_vector1)
+    norm2 = _stable_norm(scaled_vector2)
+    axis_coordinate1 = _sp3_dot(axis, scaled_vector1)
+    axis_coordinate2 = _sp3_dot(axis, scaled_vector2)
+    p1_parallel = axis_coordinate1 * axis
+    p2_parallel = axis_coordinate2 * axis
+    p1_perpendicular = scaled_vector1 - p1_parallel
+    p2_perpendicular = scaled_vector2 - p2_parallel
+    radius1 = _stable_norm(p1_perpendicular)
+    radius2 = _stable_norm(p2_perpendicular)
+    axial_difference = axis_coordinate1 - axis_coordinate2
+    effective_scale = max(
+        radius1,
+        radius2,
+        abs(axial_difference),
+        scaled_distance,
+    )
+    if effective_scale == 0.0:
+        effective_scale = 1.0
+    normalized_exact_tolerance = tolerance * max(
+        1.0 / length_scale,
+        effective_scale,
+    )
+
+    def make_result(
+        candidate_angles: list[float],
+        *,
+        degenerate: bool,
+        message: Optional[str] = None,
+        force_inexact: bool = False,
+    ) -> SP3Result:
+        unique_angles = sorted(_wrap_angle(angle) for angle in candidate_angles)
+        deduplicated: list[float] = []
+        for angle in unique_angles:
+            if not deduplicated:
+                deduplicated.append(angle)
+                continue
+            cyclic_difference = min(
+                abs(angle - deduplicated[-1]),
+                2.0 * math.pi - abs(angle - deduplicated[-1]),
+            )
+            if cyclic_difference > _DEGENERACY_TOL:
+                deduplicated.append(angle)
+        if len(deduplicated) > 1:
+            cyclic_difference = min(
+                abs(deduplicated[0] - deduplicated[-1]),
+                2.0 * math.pi - abs(deduplicated[0] - deduplicated[-1]),
+            )
+            if cyclic_difference <= _DEGENERACY_TOL:
+                deduplicated.pop()
+
+        residuals = tuple(
+            _sp3_residual(
+                scaled_vector1,
+                scaled_vector2,
+                axis,
+                scaled_distance,
+                angle,
+                length_scale,
+            )
+            for angle in deduplicated
+        )
+        exact = tuple(
+            residual / length_scale <= normalized_exact_tolerance and not force_inexact
+            for residual in residuals
+        )
+        return SP3Result(
+            angles=tuple(deduplicated),
+            is_exact=exact,
+            residuals=residuals,
+            degenerate=degenerate,
+            message=message,
+        )
+
+    # With either perpendicular radius numerically zero, the rotated endpoint
+    # has no resolvable angular dependence.  Angle zero is the canonical
+    # witness.
+    if (
+        radius1 <= _SP3_PROJECTION_TOL * norm1
+        or radius2 <= _SP3_PROJECTION_TOL * norm2
+    ):
+        constant_residual = _sp3_residual(
+            scaled_vector1,
+            scaled_vector2,
+            axis,
+            scaled_distance,
+            0.0,
+            length_scale,
+        )
+        if constant_residual / length_scale <= normalized_exact_tolerance:
+            message = (
+                "perpendicular radius is numerically zero; "
+                "rotation is underdetermined"
+            )
+        else:
+            message = (
+                "perpendicular radius is numerically zero; returned "
+                "constant-distance least-squares representative"
+            )
+        return make_result([0.0], degenerate=True, message=message)
+
+    unit_perpendicular1 = p1_perpendicular / radius1
+    unit_perpendicular2 = p2_perpendicular / radius2
+    alpha = _sp3_dot(unit_perpendicular1, unit_perpendicular2)
+    beta = _sp3_dot(np.cross(axis, unit_perpendicular1), unit_perpendicular2)
+    # Normalize the effective geometry once more before squaring.  This keeps
+    # small perpendicular radii and axial differences representable after
+    # the initial input-component scaling.
+    effective_radius1 = radius1 / effective_scale
+    effective_radius2 = radius2 / effective_scale
+    effective_axial_difference = axial_difference / effective_scale
+    effective_distance = scaled_distance / effective_scale
+    target = 0.5 * math.fsum(
+        (
+            effective_radius1 * effective_radius1,
+            effective_radius2 * effective_radius2,
+            effective_axial_difference * effective_axial_difference,
+            -(effective_distance * effective_distance),
+        )
+    )
+
+    phase = math.atan2(beta, alpha)
+    normalized_target = target / effective_radius1 / effective_radius2
+    if normalized_target > 1.0 + _SP3_INTERSECTION_TOL:
+        return make_result(
+            [phase],
+            degenerate=False,
+            message="no circle-sphere intersection; returned least-squares extremum",
+            force_inexact=True,
+        )
+    if normalized_target < -1.0 - _SP3_INTERSECTION_TOL:
+        return make_result(
+            [phase + math.pi],
+            degenerate=False,
+            message="no circle-sphere intersection; returned least-squares extremum",
+            force_inexact=True,
+        )
+
+    # Clipping is restricted to the explicitly justified roundoff band.
+    clipped_target = min(1.0, max(-1.0, normalized_target))
+    delta = math.acos(clipped_target)
+    return make_result([phase - delta, phase + delta], degenerate=False)
