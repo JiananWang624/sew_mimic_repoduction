@@ -17,6 +17,8 @@ from typing import Optional
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
+from .angles import wrap_to_pi
+
 
 Vector = NDArray[np.float64]
 Matrix = NDArray[np.float64]
@@ -180,10 +182,8 @@ def sp2(
 
 
 def _wrap_angle(angle: float) -> float:
-    """Wrap an angle to the half-open interval ``[-pi, pi)``."""
-    wrapped = (angle + math.pi) % (2.0 * math.pi) - math.pi
-    # Avoid returning positive zero from a platform-dependent modulo path.
-    return 0.0 if wrapped == 0.0 else wrapped
+    """Compatibility wrapper for SP3's established angle convention."""
+    return wrap_to_pi(angle)
 
 
 def _stable_norm(vector: Vector) -> float:
