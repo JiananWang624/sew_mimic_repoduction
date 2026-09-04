@@ -25,6 +25,7 @@ def test_project_config_loads_from_the_single_root_yaml() -> None:
         "robot",
         "human_csv",
         "task_point",
+        "stereo_sew",
         "replay_csv",
         "synthetic_replay",
         "first_frame_validation",

@@ -1,5 +1,14 @@
 # Stereographic SEW representation
 
+## Project reference
+
+The project-wide reference is deliberately configured, never implicit:
+`config.yaml: stereo_sew.e_t = [0, 0, -1]` and `e_r = [1, 0, 0]`.  It is used
+identically for human and robot geometry after both are expressed in the native
+Gen3-base evaluation frame.  The Phase-3 selection and workspace evidence are
+recorded in `GEN3_STEREO_SEW_GEOMETRY.md`; changing this pair changes the
+numerical zero/sign convention for psi.
+
 ## Purpose
 
 A seven-revolute-joint arm has one degree of kinematic redundancy after an
